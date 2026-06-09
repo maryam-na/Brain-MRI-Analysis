@@ -11,8 +11,10 @@ The project is built around the OASIS cross-sectional MRI dataset exposed by Neu
 - Leakage-aware feature handling: `CDR` is excluded after target creation
 - Shared preprocessing pipeline for both models
 - 80/20 stratified train-test split
-- 5-fold stratified cross-validation
+- repeated 5-fold stratified cross-validation for more stable validation estimates
 - `RandomizedSearchCV` hyperparameter tuning for both models
+- regularized hyperparameter ranges to reduce overfitting on the small dataset
+- out-of-fold decision-threshold tuning for sensitivity-aware evaluation
 - RandomForest vs GradientBoosting model comparison
 - ROC-AUC, sensitivity, specificity, accuracy, F1, and confusion matrix reporting
 - Clinical-style z-score validation and report consistency checks
@@ -32,21 +34,22 @@ flowchart TD
     B --> C["Target creation: CDR > 0"]
     C --> D["80/20 stratified split"]
     D --> E["Shared preprocessing"]
-    E --> F["RandomForest + RandomizedSearchCV"]
-    E --> G["GradientBoosting + RandomizedSearchCV"]
+    E --> F["Regularized RandomForest + RandomizedSearchCV"]
+    E --> G["Regularized GradientBoosting + RandomizedSearchCV"]
     F --> H["evaluation.py"]
     G --> H
-    H --> I["Metrics + comparison table"]
+    H --> I["Repeated CV + threshold tuning"]
+    I --> N["Metrics + comparison table"]
     H --> J["ROC, confusion matrix, feature importance plots"]
     B --> K["Z-score + correlation validation"]
     K --> L["report_agent.py consistency checks"]
-    I --> M["Streamlit dashboard"]
+    N --> M["Streamlit dashboard"]
     J --> M
 ```
 
-## Current Results
+## Reference Results
 
-Latest local run on an 80/20 stratified split:
+Latest local run on an 80/20 stratified split before the regularized threshold-tuning update:
 
 | Model | ROC-AUC | Sensitivity | Specificity | Accuracy | F1 |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -55,14 +58,15 @@ Latest local run on an 80/20 stratified split:
 
 By test ROC-AUC, **GradientBoosting** is the best-performing model. From a clinical screening perspective, **RandomForest may be preferable** because it has much higher sensitivity, meaning it misses fewer positive dementia cases in this run.
 
-Best tuned parameters:
+The current code now uses more conservative hyperparameter ranges, repeated cross-validation, and threshold tuning from out-of-fold training predictions. Re-run `python3 main.py` after adding the CSV to generate updated local metrics.
 
-| Model | Key Parameters |
-| --- | --- |
-| RandomForest | `n_estimators=300`, `min_samples_split=5`, `min_samples_leaf=1`, `max_features=sqrt`, `max_depth=None` |
-| GradientBoosting | `n_estimators=100`, `learning_rate=0.0733`, `max_depth=4`, `min_samples_split=10`, `min_samples_leaf=1`, `subsample=0.7` |
+The rerun writes the updated tuned parameters, decision thresholds, metrics, and plot paths to:
 
-Clinical validation from the latest run:
+```text
+outputs/results_summary.json
+```
+
+Clinical validation from the previous local run:
 
 - z-score means are approximately 0
 - z-score standard deviations are approximately 1
@@ -158,7 +162,7 @@ outputs/plots/correlation_heatmap.png
 ├── app.py                  # Streamlit dashboard
 ├── data_agent.py           # Loading, target creation, preprocessing, split, z-scores
 ├── model_agent.py          # RandomForest and GradientBoosting tuning
-├── evaluation.py           # Metrics, CV, comparison tables, plots
+├── evaluation.py           # Metrics, repeated CV, threshold tuning, plots
 ├── report_agent.py         # Clinical-style report consistency checks
 ├── main.py                 # CLI training/evaluation pipeline
 ├── data/                   # Local CSV data
@@ -173,4 +177,5 @@ outputs/plots/correlation_heatmap.png
 - This is a tabular MRI-volumetric project, not a raw MRI image segmentation pipeline.
 - The dataset is small, so results should be presented as a reproducible ML exercise rather than a deployable diagnostic system.
 - `CDR` is used to create the target and is intentionally removed from model features to avoid leakage.
+- The code uses conservative model constraints and threshold tuning to reduce mild overfitting, but external validation is still required.
 - A real clinical deployment would require external validation, calibration, threshold governance, bias analysis, privacy review, and clinician oversight.

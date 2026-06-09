@@ -17,6 +17,7 @@ from evaluation import (
     plot_roc_curves,
     print_cv_results,
     print_test_results,
+    tune_decision_threshold_cv,
 )
 from model_agent import tune_models
 
@@ -34,9 +35,11 @@ def run_pipeline(data_path: str = "data/OASIS_cross_tbl_df.csv", n_iter: int = 2
 
     results = {}
     for name, model in estimators.items():
+        threshold_info = tune_decision_threshold_cv(model, X_train, y_train)
         results[name] = {
             "cv": cross_validate_model(model, X_train, y_train),
-            "test": evaluate_model(model, X_test, y_test),
+            "test": evaluate_model(model, X_test, y_test, threshold=threshold_info["threshold"]),
+            "threshold_tuning": threshold_info,
             "best_params": tuned[name].best_params,
             "search_best_roc_auc": tuned[name].best_score,
         }
@@ -72,6 +75,7 @@ def run_pipeline(data_path: str = "data/OASIS_cross_tbl_df.csv", n_iter: int = 2
         "age_brain_volume_correlation": age_volume_corr,
         "plot_paths": plot_paths,
         "best_params": {name: results[name]["best_params"] for name in results},
+        "threshold_tuning": {name: results[name]["threshold_tuning"] for name in results},
     }
     with open(output_dir / "results_summary.json", "w", encoding="utf-8") as f:
         json.dump(serializable, f, indent=2)

@@ -17,7 +17,7 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
-from sklearn.model_selection import StratifiedKFold, cross_validate
+from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedKFold, cross_val_predict, cross_validate
 
 from data_agent import RANDOM_STATE
 from model_agent import get_feature_names
@@ -37,9 +37,9 @@ def specificity_score(y_true, y_pred) -> float:
     return tn / (tn + fp) if (tn + fp) else 0.0
 
 
-def evaluate_model(model, X_test, y_test) -> dict:
-    y_pred = model.predict(X_test)
+def evaluate_model(model, X_test, y_test, threshold: float = 0.5) -> dict:
     y_score = _positive_scores(model, X_test)
+    y_pred = (y_score >= threshold).astype(int)
     cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
     return {
         "roc_auc": roc_auc_score(y_test, y_score),
@@ -48,6 +48,7 @@ def evaluate_model(model, X_test, y_test) -> dict:
         "accuracy": accuracy_score(y_test, y_pred),
         "f1": f1_score(y_test, y_pred, zero_division=0),
         "confusion_matrix": cm,
+        "threshold": threshold,
     }
 
 
@@ -59,7 +60,7 @@ def cross_validate_model(model, X_train, y_train) -> dict:
         "accuracy": "accuracy",
         "f1": "f1",
     }
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+    cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=3, random_state=RANDOM_STATE)
     scores = cross_validate(model, X_train, y_train, scoring=scoring, cv=cv, n_jobs=-1)
     return {
         metric: {
@@ -67,6 +68,58 @@ def cross_validate_model(model, X_train, y_train) -> dict:
             "std": float(np.std(scores[f"test_{metric}"])),
         }
         for metric in scoring
+    }
+
+
+def tune_decision_threshold_cv(
+    model,
+    X_train,
+    y_train,
+    min_sensitivity: float = 0.85,
+) -> dict:
+    """Choose a decision threshold from out-of-fold training probabilities.
+
+    The primary rule keeps sensitivity at or above min_sensitivity, then picks
+    the threshold with the best F1-score. If no threshold reaches that target,
+    it falls back to Youden's J statistic.
+    """
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+    if hasattr(model, "predict_proba"):
+        y_score = cross_val_predict(model, X_train, y_train, cv=cv, method="predict_proba", n_jobs=-1)[:, 1]
+    else:
+        y_score = cross_val_predict(model, X_train, y_train, cv=cv, method="decision_function", n_jobs=-1)
+
+    candidates = []
+    for threshold in np.unique(y_score):
+        y_pred = (y_score >= threshold).astype(int)
+        sensitivity = recall_score(y_train, y_pred, zero_division=0)
+        specificity = specificity_score(y_train, y_pred)
+        f1 = f1_score(y_train, y_pred, zero_division=0)
+        candidates.append(
+            {
+                "threshold": float(threshold),
+                "sensitivity": float(sensitivity),
+                "specificity": float(specificity),
+                "f1": float(f1),
+                "youden_j": float(sensitivity + specificity - 1),
+            }
+        )
+
+    candidate_table = pd.DataFrame(candidates)
+    sensitivity_safe = candidate_table[candidate_table["sensitivity"] >= min_sensitivity]
+    if not sensitivity_safe.empty:
+        best = sensitivity_safe.sort_values(["f1", "specificity"], ascending=False).iloc[0]
+        strategy = f"max_f1_with_sensitivity_at_least_{min_sensitivity:.2f}"
+    else:
+        best = candidate_table.sort_values(["youden_j", "f1"], ascending=False).iloc[0]
+        strategy = "max_youden_j_fallback"
+
+    return {
+        "threshold": float(best["threshold"]),
+        "strategy": strategy,
+        "cv_sensitivity": float(best["sensitivity"]),
+        "cv_specificity": float(best["specificity"]),
+        "cv_f1": float(best["f1"]),
     }
 
 
@@ -94,6 +147,7 @@ def print_cv_results(results_dict: Dict[str, dict]) -> None:
 def print_test_results(results_dict: Dict[str, dict]) -> None:
     for model_name, results in results_dict.items():
         print(f"\n{model_name} test results")
+        print(f"  threshold: {results['test']['threshold']:.3f}")
         for metric in METRIC_NAMES:
             print(f"  {metric}: {results['test'][metric]:.3f}")
         print(f"  confusion_matrix:\n{results['test']['confusion_matrix']}")

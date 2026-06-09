@@ -13,6 +13,7 @@ from evaluation import (
     plot_feature_importance,
     plot_metric_bars,
     plot_roc_curves,
+    tune_decision_threshold_cv,
 )
 from model_agent import tune_models
 
@@ -35,9 +36,11 @@ def train_and_evaluate(data_path: str, n_iter: int):
 
     results = {}
     for name, model in estimators.items():
+        threshold_info = tune_decision_threshold_cv(model, X_train, y_train)
         results[name] = {
             "cv": cross_validate_model(model, X_train, y_train),
-            "test": evaluate_model(model, X_test, y_test),
+            "test": evaluate_model(model, X_test, y_test, threshold=threshold_info["threshold"]),
+            "threshold_tuning": threshold_info,
             "best_params": tuned[name].best_params,
         }
 
@@ -72,6 +75,9 @@ for col, metric in zip(cols, ["roc_auc", "sensitivity", "specificity", "accuracy
 
 st.caption("Best hyperparameters")
 st.json(results[selected_model]["best_params"])
+
+st.caption("Decision threshold selected from out-of-fold training predictions")
+st.json(results[selected_model]["threshold_tuning"])
 
 left, right = st.columns([1.1, 0.9])
 with left:
