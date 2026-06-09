@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# Local datasets
+data/*.csv
+data/*.xlsx
+data/*.rda
+
+# Generated artifacts
+outputs/*
+!outputs/.gitkeep
+!outputs/plots/
+outputs/plots/*
+!outputs/plots/.gitkeep
+
+# Streamlit
+.streamlit/secrets.toml
